@@ -22,8 +22,17 @@ namespace nn
 	template<typename T>
 	void vpack(std::vector<T>& v,std::ofstream& out)
 	{
-		for(T& t: v)
-			out<<t;
+		out.write((char*)&(v[0]),v.size()*sizeof(T));
+	}
+	template<typename T>
+	void writeout(std::ofstream& out,T&&val)
+	{
+		out.write((char*)&val,sizeof(T));
+	}
+	template<typename T>
+	void readin(std::ifstream& in,T&&val,int mul=1)
+	{
+		in.read((char*)&val,sizeof(val)*mul);
 	}
 	cl_int3 make_int3(int a,int b,int c)
 	{
@@ -103,10 +112,10 @@ namespace nn
 		cl::Buffer activation_buffer;
 		cl::Buffer error_buffer;
 		layer *previous,*next;
+		virtual ~layer(){ }
 		virtual void feedforward()=0;
 		virtual void learn()=0;
-		virtual ~layer();
-		virtual void pack(std::ofstream& out);
+		virtual void pack(std::ofstream& out)=0;
 	};
 	class relu_layer: public layer
 	{
@@ -142,7 +151,7 @@ namespace nn
 		}
 		void pack(std::ofstream& out)
 		{
-			out<<LAYER_RE;
+			writeout(out, LAYER_RE);
 		}
 	};
 	class pool_layer: public layer
@@ -185,7 +194,7 @@ namespace nn
 		}
 		void pack(std::ofstream& out)
 		{
-			out<<LAYER_PL;
+			writeout(out,LAYER_PL);
 		}
 	};
 	class conv_layer: public layer
@@ -261,7 +270,9 @@ namespace nn
 		void pack(std::ofstream& out)
 		{
 			queue.enqueueReadBuffer(filters_buffer,CL_TRUE,0,filters.size()*sizeof(double),(double*)&(filters[0]));
-			out<<LAYER_CV<<filter_dim<<filter_num;
+			writeout(out,LAYER_CV);
+			writeout(out,filter_dim);
+			writeout(out,filter_num);
 			vpack(filters,out);
 		}
 	};
@@ -319,7 +330,7 @@ namespace nn
 		}
 		void pack(std::ofstream& out)
 		{
-			out<<LAYER_FC;
+			writeout(out,LAYER_FC);
 			queue.enqueueReadBuffer(biases_buffer,CL_FALSE,0,biases.size()*sizeof(double),(double*)&(biases[0]));
 			queue.enqueueReadBuffer(weights_buffer,CL_TRUE,0,weights.size()*sizeof(double),(double*)&(weights[0]));
 			vpack(dimensions,out);
@@ -388,7 +399,7 @@ namespace nn
 		}
 		void pack(std::ofstream& out)
 		{
-			out<<LAYER_ST;
+			writeout(out,LAYER_ST);
 			vpack(dimensions,out);
 		}
 		void feedforward()
@@ -407,6 +418,7 @@ namespace nn
 	};
 	class network
 	{
+	public:
 		std::list<layer*> layers;
 		frontlayer* input;
 		layer* output;
@@ -423,44 +435,43 @@ namespace nn
 		void pack(std::string filename)
 		{
 			std::ofstream out(filename,std::ios::binary|std::ios::out);
-			out<<layers.size();
+			writeout(out,layers.size());
 			for(auto i:layers)
 				i->pack(out);
 			out.close();
 		}
 		~network()
 		{
-			for(auto i:layers)
+			for(layer* i:layers)
 				delete i;
 		}
 		network(std::string filename)
 		{
 			std::ifstream inp(filename,std::ios::binary|std::ios::in);
 			int i;
-			inp>>i;
+			readin(inp,i);
 			std::vector<int> d_n_s(3);
 			for(;i>0;--i)
 			{
 				int layer_type;
-				inp>>layer_type;
+				readin(inp,layer_type);
 				switch(layer_type)
 				{
 				case LAYER_ST:
-					for(int l=0;l<3;++l)
-					inp>>d_n_s[l];
+					readin(inp,d_n_s[0],3);
 					input=new frontlayer(d_n_s);
 					output=input;
 					layers.push_back(output);
 					break;
 				case LAYER_FC:
-					for(int l=0;l<3;++l)
-						inp>>d_n_s[l];
+					readin(inp,d_n_s[0],3);
 					output=new fc_layer(d_n_s,output,&inp);
 					layers.push_back(output);
 					break;
 				case LAYER_CV:
 					int f_d,f_n;
-					inp>>f_d>>f_n;
+					readin(inp,f_d);
+					readin(inp,f_n);
 					output=new conv_layer(f_d,f_n,output,&inp);
 					layers.push_back(output);
 					break;
@@ -477,7 +488,7 @@ namespace nn
 				}
 			}
 		}
-		network(int l_n,std::vector<int>&& parameters)
+		network(std::vector<int>&& parameters)
 		{
 			std::vector<int> d_n_s(3);
 			for(unsigned int i=0;i<parameters.size();++i)
@@ -520,9 +531,20 @@ namespace nn
 			}
 		}
 	};
-
 }
+/* CNN from scratch:
+	start with LAYER_ST supplied with 3 ints (dims)
+	then any sequence of:
+	LAYER_FC,3ints(dims)
+	LAYER_CV,2ints(f_d,f_n)
+	LAYER_RE
+	LAYER_PL
+	end with LAYER_FC and 3ints(dims)
+*/	
+
 int main()
 {
 	nn::init();
+	nn::network test(std::vector<int>{LAYER_ST,7,7,3,LAYER_CV,3,3,LAYER_RE,LAYER_PL,LAYER_FC,10,1,1});
+	test.pack("cnn.packed");
 }
