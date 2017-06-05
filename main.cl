@@ -101,7 +101,7 @@ __kernel void fc_adapt_kernel(__global double* error,__global double* prev_activ
 	int j=get_global_id(1);
 	int k=get_global_id(2);
 	int3 point = (int3)(i,j,k);
-	write_add(biases,size,point,learnrate*read(error,size,point));
+	write_add(biases,size,point,-learnrate*read(error,size,point));
 	for(int x=0;x<size_prev.s0;++x)
 		for(int y=0;y<size_prev.s1;++y)
 			for(int z=0;z<size_prev.s2;++z)
@@ -145,7 +145,7 @@ __kernel void cv_backpropagate_kernel(__global double* out_error,__global double
 				int3 curwf=(int3)(-x,-y,point.s2);
 				tmpvalue+=convspecialread(filters,filtersize,curwf,size,curp)*read(cur_error,size,curp);
 			}
-	write(out_error,size_prev,point,tmpvalue);
+	write(out_error,size_prev,point,tmpvalue/(filtersize.s0*filtersize.s1*filtersize.s2));
 }
 //Some advanced trickery here
 //Now we launch straight from filters and sum deltas all over the layer
@@ -221,5 +221,5 @@ __kernel void pool_backpropagate_kernel(__global double* out_error,__global doub
 __kernel void initial_error_calc_kernel(__global double* activation, __global double* desired,__global double* error,__global double* weighted)
 {
 	int i=get_global_id(0);
-	error[i]=(activation[i]-desired[i])*sigmoid_prime(weighted[i]);
+	error[i]=(activation[i]-desired[i]);//*sigmoid_prime(weighted[i]);
 }

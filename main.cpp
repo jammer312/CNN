@@ -30,9 +30,9 @@ namespace nn
 		out.write((char*)&val,sizeof(T));
 	}
 	template<typename T>
-	void readin(std::ifstream& in,T&&val,int mul=1)
+	void readin(std::ifstream& in,T* val,int mul=1)
 	{
-		in.read((char*)&val,sizeof(val)*mul);
+		in.read((char*)val,sizeof(T)*mul);
 	}
 	cl_int3 make_int3(int a,int b,int c)
 	{
@@ -111,7 +111,7 @@ namespace nn
 		int total_size;
 		cl::Buffer activation_buffer;
 		cl::Buffer error_buffer;
-		layer *previous,*next;
+		layer *previous,*next=NULL;
 		virtual ~layer(){ }
 		virtual void feedforward()=0;
 		virtual void learn()=0;
@@ -226,8 +226,7 @@ namespace nn
 			if(fs)
 			{
 				std::ifstream& ifs=*fs;
-				for(int i=0;i<tmp_size;++i)
-					ifs>>filters[i];
+				readin(ifs,&(filters[0]),tmp_size);
 			}
 			else
 			{
@@ -310,10 +309,8 @@ namespace nn
 			if(fs)
 			{
 				std::ifstream& ifs=*fs;
-				for(unsigned int i=0;i<biases.size();++i)
-					ifs>>biases[i];
-				for(unsigned int i=0;i<weights.size();++i)
-					ifs>>weights[i];
+				readin(ifs,&(biases[0]),biases.size());
+				readin(ifs,&(weights[0]),weights.size());
 			}
 			else
 			{
@@ -340,12 +337,15 @@ namespace nn
 		void prepare(double* desired_out)
 		{
 			IEC_kernel.setArg(0,activation_buffer);
-			IEC_kernel.setArg(1,activation_buffer);
-			IEC_kernel.setArg(2,IEC_buffer);
-			IEC_kernel.setArg(3,error_buffer);
-			IEC_kernel.setArg(4,w_inp_buffer);
+			IEC_kernel.setArg(1,IEC_buffer);
+			IEC_kernel.setArg(2,error_buffer);
+			IEC_kernel.setArg(3,w_inp_buffer);
 			queue.enqueueWriteBuffer(IEC_buffer,CL_FALSE,0,total_size*sizeof(double),desired_out);
 			queue.enqueueNDRangeKernel(IEC_kernel,cl::NullRange,cl::NDRange(total_size));
+		}
+		void unload(double* where)
+		{
+			queue.enqueueReadBuffer(activation_buffer,CL_TRUE,0,total_size*sizeof(double),where);
 		}
 		void feedforward()
 		{
@@ -432,10 +432,14 @@ namespace nn
 			((fc_layer*)output)->prepare(desired);
 			output->learn();
 		}
+		void retrieve(double* where)
+		{
+			((fc_layer*)output)->unload(where);
+		}
 		void pack(std::string filename)
 		{
 			std::ofstream out(filename,std::ios::binary|std::ios::out);
-			writeout(out,layers.size());
+			writeout(out,(unsigned int)layers.size());
 			for(auto i:layers)
 				i->pack(out);
 			out.close();
@@ -449,29 +453,29 @@ namespace nn
 		{
 			std::ifstream inp(filename,std::ios::binary|std::ios::in);
 			int i;
-			readin(inp,i);
+			readin(inp,&i);
 			std::vector<int> d_n_s(3);
 			for(;i>0;--i)
 			{
 				int layer_type;
-				readin(inp,layer_type);
+				readin(inp,&layer_type);
 				switch(layer_type)
 				{
 				case LAYER_ST:
-					readin(inp,d_n_s[0],3);
+					readin(inp,&(d_n_s[0]),3);
 					input=new frontlayer(d_n_s);
 					output=input;
 					layers.push_back(output);
 					break;
 				case LAYER_FC:
-					readin(inp,d_n_s[0],3);
+					readin(inp,&(d_n_s[0]),3);
 					output=new fc_layer(d_n_s,output,&inp);
 					layers.push_back(output);
 					break;
 				case LAYER_CV:
 					int f_d,f_n;
-					readin(inp,f_d);
-					readin(inp,f_n);
+					readin(inp,&f_d);
+					readin(inp,&f_n);
 					output=new conv_layer(f_d,f_n,output,&inp);
 					layers.push_back(output);
 					break;
@@ -491,7 +495,7 @@ namespace nn
 		network(std::vector<int>&& parameters)
 		{
 			std::vector<int> d_n_s(3);
-			for(unsigned int i=0;i<parameters.size();++i)
+			for(unsigned int i=0;i<parameters.size();)
 			{
 				int layer_type=parameters[i];
 				++i;
@@ -499,14 +503,16 @@ namespace nn
 				{
 				case LAYER_ST:
 					for(int l=0;l<3;++l,++i)
-						d_n_s[l]=parameters[i+l];
+						{
+							d_n_s[l]=parameters[i];
+						}
 					input=new frontlayer(d_n_s);
 					output=input;
 					layers.push_back(output);
 					break;
 				case LAYER_FC:
 					for(int l=0;l<3;++l,++i)
-						d_n_s[l]=parameters[i+l];
+						d_n_s[l]=parameters[i];
 					output=new fc_layer(d_n_s,output);
 					layers.push_back(output);
 					break;
@@ -541,10 +547,26 @@ namespace nn
 	LAYER_PL
 	end with LAYER_FC and 3ints(dims)
 */	
-
+//NOTICE: list.size() returns 64bit value (unsigned long long)
 int main()
 {
 	nn::init();
+	/*
 	nn::network test(std::vector<int>{LAYER_ST,7,7,3,LAYER_CV,3,3,LAYER_RE,LAYER_PL,LAYER_FC,10,1,1});
+	// nn::network test(std::vector<int>{LAYER_ST,2,2,1,LAYER_FC,10,1,1});
+	/*/nn::network test("cnn.packed");
+	std::vector<double> a=std::vector<double>(7*7*3,.1);
+	// std::vector<double> a=std::vector<double>(4,.1);
+	std::vector<double> b=std::vector<double>(10,1);
+	std::vector<double> c=b;
+	// for(int i=0;i<3;++i,std::cout<<"\n")
+	// {
+		test.launch(a);
+		test.retrieve(&(b[0]));
+		for(auto l:b)
+			std::cout<<l<<" ";
+		test.train(&(c[0]));
+	// }
+	//*/
 	test.pack("cnn.packed");
 }
