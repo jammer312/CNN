@@ -9,7 +9,7 @@
 
 #include <CL/cl2.hpp>
 
-#define LEARN_RATE 0.05
+#define LEARN_RATE 0.3
 
 #define LAYER_ST 0
 #define LAYER_FC 1
@@ -54,7 +54,7 @@ namespace nn
 
 	std::random_device rd;
 	std::mt19937 e2(rd());
-	std::uniform_real_distribution<double> dist(0.0001,0.001);
+	std::uniform_real_distribution<double> dist(-0.5,0.5);
 				
 	cl::Program program;
 	cl::Context context;
@@ -370,7 +370,7 @@ namespace nn
 			ie_k.setArg(0,error_buffer);
 			ie_k.setArg(1,w_inp_buffer);
 			ie_k.setArg(2,make_int3(dimensions[0],dimensions[1],dimensions[2]));
-/*			if(total_size==1)
+		/*	if(total_size==1)
 			{
 				double test;
 				queue.enqueueReadBuffer(error_buffer,CL_TRUE,0,sizeof(double),&test);
@@ -380,9 +380,9 @@ namespace nn
 				queue.enqueueReadBuffer(error_buffer,CL_TRUE,0,sizeof(double),&test);
 				std::cout<<"Internal error derivative:\n";
 				std::cout<<test<<"\n\n";
-			}			*/
-			//else
-			queue.enqueueNDRangeKernel(ie_k,cl::NullRange,cl::NDRange(dimensions[0],dimensions[1],dimensions[2]));
+			}			
+			else	*/
+				queue.enqueueNDRangeKernel(ie_k,cl::NullRange,cl::NDRange(dimensions[0],dimensions[1],dimensions[2]));
 			bp_k.setArg(0,previous->error_buffer);
 			bp_k.setArg(1,error_buffer);
 			bp_k.setArg(2,weights_buffer);
@@ -614,6 +614,7 @@ ubyte from_arr_to_label(std::vector<double>& in)
 	end with LAYER_FC and 3ints(dims)
 */	
 //NOTICE: list.size() returns 64bit value (unsigned long long)
+
 int main()
 {
 	std::ios_base::sync_with_stdio(0);
@@ -638,7 +639,7 @@ int main()
 	switch_endian(&dimy);
 	//Preps done
 	//mnist_test.pack("cnn.packed");
-	/*
+	//*
 	nn::network mnist_test("cnn.packed");
 	std::vector<double> output=std::vector<double>(10);
 	int hits=0;
@@ -662,7 +663,7 @@ int main()
 	std::vector<double> output=std::vector<double>(10);
 	// nn::network mnist_test(std::vector<int>{LAYER_ST,dimx,dimy,1,LAYER_CV,3,3,LAYER_RE,LAYER_PL,LAYER_CV,3,3,LAYER_RE,LAYER_PL,LAYER_CV,3,3,LAYER_RE,LAYER_FC,10,1,1});
 	// nn::network mnist_test(std::vector<int>{LAYER_ST,dimx,dimy,1,LAYER_FC,14,14,1,LAYER_FC,10,1,1});
-	nn::network mnist_test(std::vector<int>{LAYER_ST,dimx,dimy,1,LAYER_FC,1,1,1,LAYER_FC,5,2,1});	
+	nn::network mnist_test(std::vector<int>{LAYER_ST,dimx,dimy,1,LAYER_FC,5,6,10,LAYER_FC,10,1,1});	
 	for(int i=0;i<num;++i)
 	{
 		if(!(i%100))
@@ -682,3 +683,34 @@ int main()
 	mnist_test.pack("cnn.packed");
 	//*/
 }
+
+/*
+int main()
+{
+	std::ios_base::sync_with_stdio(0);
+	nn::init();
+	std::vector<double> inp=std::vector<double>(4,0.7);
+	std::vector<double> inp2=std::vector<double>(4,0.2);
+	double out;
+	nn::network test(std::vector<int>{LAYER_ST,2,2,1,LAYER_FC,2,2,1,LAYER_FC,1,1,1});
+	test.pack("cnn.packed");
+	for(int i=0;i<100;++i)
+	{
+		test.launch(inp);
+		test.retrieve(&out);
+		std::cout<<inp[0]<<" -> "<<out<<std::endl;
+		test.train(inp.data());
+		test.launch(inp);
+		test.retrieve(&out);
+		std::cout<<inp[0]<<" -> "<<out<<std::endl<<std::endl;
+
+		test.launch(inp2);
+		test.retrieve(&out);
+		std::cout<<inp2[0]<<" -> "<<out<<std::endl;
+		test.train(inp2.data());
+		test.launch(inp2);
+		test.retrieve(&out);
+		std::cout<<inp2[0]<<" -> "<<out<<std::endl<<std::endl;
+	}
+}
+//*/
