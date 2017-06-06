@@ -33,15 +33,15 @@ void specialmodify(__global double* array,int3 size,int3 point,int3 ext_size,int
 	array[smallsize*(ext_point.s0+ext_point.s1*ext_size.s0+ext_point.s2*ext_size.s1*ext_size.s0)+point.s0+point.s1*size.s0+point.s2*size.s1*size.s0]+=modificator;
 }
 //unsafe for convolution
-double convspecialread(__global double* array,int3 size,int3 point,int3 ext_size,int3 ext_point)
+double convspecialread(__global double* array,int3 size,int3 point,int filter)
 {
 	int smallsize=size.s0*size.s1*size.s2;
-	return array[smallsize*(ext_point.s2)+point.s0+point.s1*size.s0+point.s2*size.s1*size.s0];
+	return array[smallsize*(filter)+point.s0+point.s1*size.s0+point.s2*size.s1*size.s0];
 }
-void convspecialmodify(__global double* array,int3 size,int3 point,int3 ext_size,int3 ext_point,double modificator)
+void convspecialmodify(__global double* array,int3 size,int3 point,int filter,double modificator)
 {
 	int smallsize=size.s0*size.s1*size.s2;
-	 array[smallsize*(ext_point.s2)+point.s0+point.s1*size.s0+point.s2*size.s1*size.s0]+=modificator;
+	array[smallsize*(filter)+point.s0+point.s1*size.s0+point.s2*size.s1*size.s0]+=modificator;
 }
 //unsafe write
 void write(__global double* array,int3 size,int3 point,double value)
@@ -121,7 +121,7 @@ __kernel void cv_feedforward_kernel(__global double* in, __global double* out,__
 		for(int y=i-halfsize;y<=i+halfsize;++y)
 			for(int z=0;z<size_prev.s2;++z)
 			{
-				tmpvalue+=read(in,size_prev,(int3)(x,y,z))*(convspecialread(filters,filtersize,(int3)(x-i+halfsize,y-i+halfsize,z),size,point));
+				tmpvalue+=read(in,size_prev,(int3)(x,y,z))*(convspecialread(filters,filtersize,(int3)(x-i+halfsize,y-i+halfsize,z),k));
 			}
 	write(out,size,point,tmpvalue);
 }
@@ -137,15 +137,15 @@ __kernel void cv_backpropagate_kernel(__global double* out_error,__global double
 	int halfsize=fsize/2;
 	int3 filtersize=(int3)(fsize,fsize,size_prev.s2);
 	double tmpvalue=0;
-	for(int x=-halfsize;x<=halfsize;++x)
-		for(int y=-halfsize;y<=halfsize;++y)
-			for(int z=0;z<size.s2;++z)
+	for(int x=-halfsize;x<=halfsize;++x) //infilter 
+		for(int y=-halfsize;y<=halfsize;++y) //infilter
+			for(int z=0;z<size.s2;++z) //filters
 			{
-				int3 curp=(int3)(point.s0+x,point.s1+y,z);
-				int3 curwf=(int3)(-x,-y,point.s2);
-				tmpvalue+=convspecialread(filters,filtersize,curwf,size,curp)*read(cur_error,size,curp);
+				int3 curp=(int3)(point.s0+x,point.s1+y,z);//current point in filter activation
+				int3 curwf=(int3)(-x+halfsize,-y+halfsize,point.s2);//corresponding weight
+				tmpvalue+=convspecialread(filters,filtersize,curwf,z)*read(cur_error,size,curp);
 			}
-	write(out_error,size_prev,point,tmpvalue/(size.s0*size.s1*size.s2));
+	write(out_error,size_prev,point,tmpvalue);// /(size.s0*size.s1*size.s2)); - no need to divide cause it'll give wrong measurement
 }
 //Some advanced trickery here
 //Now we launch straight from filters and sum deltas all over the layer
@@ -163,9 +163,9 @@ __kernel void cv_adapt_kernel(__global double* fweights,__global double* cur_err
 	int halfsize=fsize/2;
 	int relx=-halfsize+a;
 	int rely=-halfsize+b;
-	double tmpdelta=0;
 	for(int d=0;d<size.s2;++d)
 	{		
+		double tmpdelta=0;
 		for(int x=0;x<size.s0;++x)
 			for(int y=0;y<size.s1;++y)
 			{
@@ -173,7 +173,7 @@ __kernel void cv_adapt_kernel(__global double* fweights,__global double* cur_err
 				tmpdelta+=read(prev_activation,size_prev,curp)*read(cur_error,size,(int3)(x,y,d));
 			}
 		tmpdelta/=size.s0*size.s1;
-		fweights[a+b*fsize+c*fsize*fsize+d*fsize*fsize*size_prev.s2]-=tmpdelta*learnrate;
+		convspecialmodify(fweights,filtersize,point,d,-tmpdelta*learnrate);
 	}
 }
 __kernel void relu_feedforward_kernel(__global double* in,__global double* out,int3 size)

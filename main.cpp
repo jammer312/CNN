@@ -17,8 +17,6 @@
 #define LAYER_RE 3
 #define LAYER_PL 4
 
-std::vector<double> testarr=std::vector<double>(10);
-
 namespace nn
 {
 	template<typename T>
@@ -372,12 +370,19 @@ namespace nn
 			ie_k.setArg(0,error_buffer);
 			ie_k.setArg(1,w_inp_buffer);
 			ie_k.setArg(2,make_int3(dimensions[0],dimensions[1],dimensions[2]));
-			queue.enqueueNDRangeKernel(ie_k,cl::NullRange,cl::NDRange(dimensions[0],dimensions[1],dimensions[2]));			
-			// queue.enqueueReadBuffer(error_buffer,CL_TRUE,0,total_size*sizeof(double),testarr.data());
-			// std::cout<<"Internal error derivative:\n";
-			// for(int i=0;i<total_size;++i)
-			// 	std::cout<<testarr[i]<<" ";
-			// std::cout<<"\n";
+/*			if(total_size==1)
+			{
+				double test;
+				queue.enqueueReadBuffer(error_buffer,CL_TRUE,0,sizeof(double),&test);
+				std::cout<<"External error derivative:\n";
+				std::cout<<test<<"\n";
+				queue.enqueueNDRangeKernel(ie_k,cl::NullRange,cl::NDRange(dimensions[0],dimensions[1],dimensions[2]));
+				queue.enqueueReadBuffer(error_buffer,CL_TRUE,0,sizeof(double),&test);
+				std::cout<<"Internal error derivative:\n";
+				std::cout<<test<<"\n\n";
+			}			*/
+			//else
+			queue.enqueueNDRangeKernel(ie_k,cl::NullRange,cl::NDRange(dimensions[0],dimensions[1],dimensions[2]));
 			bp_k.setArg(0,previous->error_buffer);
 			bp_k.setArg(1,error_buffer);
 			bp_k.setArg(2,weights_buffer);
@@ -655,8 +660,9 @@ int main()
 	/*/
 	//nn::network mnist_test("cnn.packed");
 	std::vector<double> output=std::vector<double>(10);
-	nn::network mnist_test(std::vector<int>{LAYER_ST,dimx,dimy,1,LAYER_CV,3,3,LAYER_RE,LAYER_PL,LAYER_CV,3,3,LAYER_RE,LAYER_PL,LAYER_CV,3,3,LAYER_RE,LAYER_FC,10,1,1});
-	// nn::network mnist_test(std::vector<int>{LAYER_ST,dimx,dimy,1,LAYER_FC,10,1,1});
+	// nn::network mnist_test(std::vector<int>{LAYER_ST,dimx,dimy,1,LAYER_CV,3,3,LAYER_RE,LAYER_PL,LAYER_CV,3,3,LAYER_RE,LAYER_PL,LAYER_CV,3,3,LAYER_RE,LAYER_FC,10,1,1});
+	// nn::network mnist_test(std::vector<int>{LAYER_ST,dimx,dimy,1,LAYER_FC,14,14,1,LAYER_FC,10,1,1});
+	nn::network mnist_test(std::vector<int>{LAYER_ST,dimx,dimy,1,LAYER_FC,1,1,1,LAYER_FC,5,2,1});	
 	for(int i=0;i<num;++i)
 	{
 		if(!(i%100))
