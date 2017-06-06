@@ -17,6 +17,8 @@
 #define LAYER_RE 3
 #define LAYER_PL 4
 
+std::vector<double> testarr=std::vector<double>(10);
+
 namespace nn
 {
 	template<typename T>
@@ -342,6 +344,11 @@ namespace nn
 			IEC_kernel.setArg(3,w_inp_buffer);
 			queue.enqueueWriteBuffer(IEC_buffer,CL_FALSE,0,total_size*sizeof(double),desired_out);
 			queue.enqueueNDRangeKernel(IEC_kernel,cl::NullRange,cl::NDRange(total_size));
+			// queue.enqueueReadBuffer(error_buffer,CL_TRUE,0,total_size*sizeof(double),testarr.data());
+			// std::cout<<"External error derivative:\n";
+			// for(int i=0;i<total_size;++i)
+			// 	std::cout<<testarr[i]<<" ";
+			// std::cout<<"\n";
 		}
 		void unload(double* where)
 		{
@@ -366,6 +373,11 @@ namespace nn
 			ie_k.setArg(1,w_inp_buffer);
 			ie_k.setArg(2,make_int3(dimensions[0],dimensions[1],dimensions[2]));
 			queue.enqueueNDRangeKernel(ie_k,cl::NullRange,cl::NDRange(dimensions[0],dimensions[1],dimensions[2]));			
+			// queue.enqueueReadBuffer(error_buffer,CL_TRUE,0,total_size*sizeof(double),testarr.data());
+			// std::cout<<"Internal error derivative:\n";
+			// for(int i=0;i<total_size;++i)
+			// 	std::cout<<testarr[i]<<" ";
+			// std::cout<<"\n";
 			bp_k.setArg(0,previous->error_buffer);
 			bp_k.setArg(1,error_buffer);
 			bp_k.setArg(2,weights_buffer);
@@ -395,7 +407,8 @@ namespace nn
 			for(int i: dimensions)
 				total_size*=i;
 			activation=std::vector<double>(total_size);
-			activation_buffer=cl::Buffer(context,CL_MEM_READ_ONLY,total_size*sizeof(double));			
+			activation_buffer=cl::Buffer(context,CL_MEM_READ_ONLY,total_size*sizeof(double));
+			error_buffer=cl::Buffer(context,CL_MEM_READ_WRITE,total_size*sizeof(double));
 		}
 		void pack(std::ofstream& out)
 		{
@@ -404,7 +417,8 @@ namespace nn
 		}
 		void feedforward()
 		{
-			queue.enqueueWriteBuffer(activation_buffer,CL_FALSE,0,total_size*sizeof(double),(double*)&(activation[0]));
+			//blocking so we can call it in a loop
+			queue.enqueueWriteBuffer(activation_buffer,CL_TRUE,0,total_size*sizeof(double),(double*)&(activation[0]));
 			if(next)
 				next->feedforward(); //loads in and passes execution further
 		}
@@ -538,6 +552,53 @@ namespace nn
 		}
 	};
 }
+
+void switch_endian(int* input)
+{
+	char* tmp=(char*)input;
+	char temp=tmp[0];
+	tmp[0]=tmp[3];
+	tmp[3]=temp;
+	temp=tmp[1];
+	tmp[1]=tmp[2];
+	tmp[2]=temp;
+}
+
+#define ubyte unsigned char
+
+std::vector<double> get_label(std::ifstream& in)
+{
+	ubyte tmp;
+	in.read((char*)&tmp,sizeof(tmp));
+	std::vector<double> out(10,0.01);
+	out[tmp]=0.09;
+	return out;
+}
+std::vector<double> get_image(std::ifstream& in,int dimx,int dimy)
+{
+	std::vector<double> image(dimx*dimy,0);
+	ubyte tmp;
+	for(unsigned int i=0;i<image.size();++i)
+	{
+		in.read((char*)&tmp,sizeof(tmp));
+		image[i]=tmp/255.;
+	}
+	return image;
+}
+ubyte from_arr_to_label(std::vector<double>& in)
+{
+	double max=-1;
+	int ind=-1;
+	for(unsigned int i=0;i<in.size();++i)
+	{
+		if(in[i]>max)
+		{
+			ind=i;max=in[i];
+		}
+	}
+	return ind;
+}
+
 /* CNN from scratch:
 	start with LAYER_ST supplied with 3 ints (dims)
 	then any sequence of:
@@ -550,23 +611,68 @@ namespace nn
 //NOTICE: list.size() returns 64bit value (unsigned long long)
 int main()
 {
+	std::ios_base::sync_with_stdio(0);
 	nn::init();
+
+	//MNIST reading
+	std::ifstream input_label("./train-labels.idx1-ubyte",std::ios_base::binary);
+	std::ifstream input_images("./train-images.idx3-ubyte",std::ios_base::binary);
+	int32_t buffer;
+	//reading magic numbers
+	input_label.read((char*)&buffer,sizeof(buffer));
+	input_images.read((char*)&buffer,sizeof(buffer));
+	int32_t num,num2;
+	input_label.read((char*)&num,sizeof(num));
+	input_images.read((char*)&num2,sizeof(num2));
+	assert(num==num2);
+	switch_endian(&num);
+	int32_t dimx,dimy;
+	input_images.read((char*)&dimx,sizeof(dimx));
+	input_images.read((char*)&dimy,sizeof(dimy));
+	switch_endian(&dimx);
+	switch_endian(&dimy);
+	//Preps done
+	//mnist_test.pack("cnn.packed");
 	/*
-	nn::network test(std::vector<int>{LAYER_ST,7,7,3,LAYER_CV,3,3,LAYER_RE,LAYER_PL,LAYER_FC,10,1,1});
-	// nn::network test(std::vector<int>{LAYER_ST,2,2,1,LAYER_FC,10,1,1});
-	/*/nn::network test("cnn.packed");
-	std::vector<double> a=std::vector<double>(7*7*3,.1);
-	// std::vector<double> a=std::vector<double>(4,.1);
-	std::vector<double> b=std::vector<double>(10,1);
-	std::vector<double> c=b;
-	// for(int i=0;i<3;++i,std::cout<<"\n")
-	// {
-		test.launch(a);
-		test.retrieve(&(b[0]));
-		for(auto l:b)
-			std::cout<<l<<" ";
-		test.train(&(c[0]));
-	// }
+	nn::network mnist_test("cnn.packed");
+	std::vector<double> output=std::vector<double>(10);
+	int hits=0;
+	for(int i=0;i<num;++i)
+	{
+		if(!(i%100))
+			std::cout<<"Starting sample "<<i+1<<" out of "<<num<<"; "<<hits*1.0/i<<std::endl;
+		std::vector<double> image=get_image(input_images,dimx,dimy);
+		mnist_test.launch(image);
+		std::vector<double> label=get_label(input_label);
+		mnist_test.retrieve(&output[0]);
+		ubyte l1=from_arr_to_label(label);
+		ubyte l2=from_arr_to_label(output);
+		hits+=l1==l2;
+		//std::cout<<(int)l1<<" -> "<<(int)l2<<"\n";
+		std::cout<<output[0]<<std::endl;
+		//mnist_test.train(&label[0]);
+	}
+	/*/
+	//nn::network mnist_test("cnn.packed");
+	std::vector<double> output=std::vector<double>(10);
+	nn::network mnist_test(std::vector<int>{LAYER_ST,dimx,dimy,1,LAYER_CV,3,3,LAYER_RE,LAYER_PL,LAYER_CV,3,3,LAYER_RE,LAYER_PL,LAYER_CV,3,3,LAYER_RE,LAYER_FC,10,1,1});
+	// nn::network mnist_test(std::vector<int>{LAYER_ST,dimx,dimy,1,LAYER_FC,10,1,1});
+	for(int i=0;i<num;++i)
+	{
+		if(!(i%100))
+			std::cout<<"Starting sample "<<i+1<<" out of "<<num<<std::endl;
+		std::vector<double> image=get_image(input_images,dimx,dimy);
+		mnist_test.launch(image);
+		std::vector<double> label=get_label(input_label);
+		mnist_test.retrieve(output.data());
+		// for(double d:output)
+		// 	std::cout<<d<<" ";
+		// std::cout<<"\nBut want\n";
+		// for(double d:label)
+		// 	std::cout<<d<<" ";
+		// std::cout<<"\n";
+		mnist_test.train(&label[0]);
+	}
+	mnist_test.pack("cnn.packed");
 	//*/
-	test.pack("cnn.packed");
 }

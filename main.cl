@@ -105,7 +105,7 @@ __kernel void fc_adapt_kernel(__global double* error,__global double* prev_activ
 	for(int x=0;x<size_prev.s0;++x)
 		for(int y=0;y<size_prev.s1;++y)
 			for(int z=0;z<size_prev.s2;++z)
-				specialmodify(weights,size_prev,(int3)(x,y,z),size,point,-learnrate*read(error,size_prev,(int3)(x,y,z))*read(prev_activation,size_prev,(int3)(x,y,z)));
+				specialmodify(weights,size_prev,(int3)(x,y,z),size,point,-learnrate*read(error,size,point)*read(prev_activation,size_prev,(int3)(x,y,z)));
 }
 __kernel void cv_feedforward_kernel(__global double* in, __global double* out,__global double* filters,
 	int fsize,int3 size,int3 size_prev)
@@ -145,7 +145,7 @@ __kernel void cv_backpropagate_kernel(__global double* out_error,__global double
 				int3 curwf=(int3)(-x,-y,point.s2);
 				tmpvalue+=convspecialread(filters,filtersize,curwf,size,curp)*read(cur_error,size,curp);
 			}
-	write(out_error,size_prev,point,tmpvalue/(filtersize.s0*filtersize.s1*filtersize.s2));
+	write(out_error,size_prev,point,tmpvalue/(size.s0*size.s1*size.s2));
 }
 //Some advanced trickery here
 //Now we launch straight from filters and sum deltas all over the layer
